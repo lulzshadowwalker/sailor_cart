@@ -170,25 +170,17 @@ class SailorCartProduct {
 abstract class SailorCartAddon {
   final String id;
   final SailorPrice price;
-  final int quantity;
 
   const SailorCartAddon({
     required this.id,
     required this.price,
-    required this.quantity,
   });
 
-  SailorCartAddon copyWith({
-    String? id,
-    SailorPrice? price,
-    int? quantity,
-  });
+  double get total => price.total;
 
-  double get total => price.total * quantity;
+  double get tax => price.tax;
 
-  double get tax => price.tax * quantity;
-
-  double get subtotal => price.subtotal * quantity;
+  double get subtotal => price.subtotal;
 }
 
 @immutable
@@ -199,7 +191,6 @@ class SailorCartSingleAddon extends SailorCartAddon {
   const SailorCartSingleAddon({
     required super.id,
     required super.price,
-    required super.quantity,
     required this.group,
     this.selected = false,
   });
@@ -208,14 +199,12 @@ class SailorCartSingleAddon extends SailorCartAddon {
   SailorCartSingleAddon copyWith({
     String? id,
     SailorPrice? price,
-    int? quantity,
     String? group,
     bool? selected,
   }) {
     return SailorCartSingleAddon(
       id: id ?? super.id,
       price: price ?? super.price,
-      quantity: quantity ?? super.quantity,
       group: group ?? this.group,
       selected: selected ?? this.selected,
     );
@@ -228,23 +217,18 @@ class SailorCartSingleAddon extends SailorCartAddon {
     return other is SailorCartSingleAddon &&
         other.id == id &&
         other.price == price &&
-        other.quantity == quantity &&
         other.group == group &&
         other.selected == selected;
   }
 
   @override
   int get hashCode {
-    return id.hashCode ^
-        price.hashCode ^
-        quantity.hashCode ^
-        group.hashCode ^
-        selected.hashCode;
+    return id.hashCode ^ price.hashCode ^ group.hashCode ^ selected.hashCode;
   }
 
   @override
   String toString() =>
-      'SailorCartSingleAddon(id: $id, price: $price, quantity: $quantity, group: $group, selected: $selected)';
+      'SailorCartSingleAddon(id: $id, price: $price, group: $group, selected: $selected)';
 }
 
 @immutable
@@ -252,19 +236,15 @@ class SailorCartMultipleAddon extends SailorCartAddon {
   const SailorCartMultipleAddon({
     required super.id,
     required super.price,
-    required super.quantity,
   });
 
-  @override
   SailorCartMultipleAddon copyWith({
     String? id,
     SailorPrice? price,
-    int? quantity,
   }) {
     return SailorCartMultipleAddon(
       id: id ?? super.id,
       price: price ?? super.price,
-      quantity: quantity ?? super.quantity,
     );
   }
 
@@ -274,47 +254,45 @@ class SailorCartMultipleAddon extends SailorCartAddon {
 
     return other is SailorCartMultipleAddon &&
         other.id == id &&
-        other.price == price &&
-        other.quantity == quantity;
+        other.price == price;
   }
 
   @override
   int get hashCode {
-    return id.hashCode ^ price.hashCode ^ quantity.hashCode;
+    return id.hashCode ^ price.hashCode;
   }
 
   @override
-  String toString() =>
-      'SailorCartMultipleAddon(id: $id, price: $price, quantity: $quantity)';
+  String toString() => 'SailorCartMultipleAddon(id: $id, price: $price)';
 }
 
 @immutable
 class SailorCartCounterAddon extends SailorCartAddon {
   final int min;
   final int max;
+  final int quantity;
 
   const SailorCartCounterAddon({
     required super.id,
     required super.price,
-    required super.quantity,
     required this.min,
     required this.max,
+    this.quantity = 0,
   });
 
-  @override
   SailorCartCounterAddon copyWith({
     String? id,
     SailorPrice? price,
-    int? quantity,
     int? min,
     int? max,
+    int? quantity,
   }) {
     return SailorCartCounterAddon(
       id: id ?? super.id,
       price: price ?? super.price,
-      quantity: quantity ?? super.quantity,
       min: min ?? this.min,
       max: max ?? this.max,
+      quantity: quantity ?? this.quantity,
     );
   }
 
@@ -325,23 +303,32 @@ class SailorCartCounterAddon extends SailorCartAddon {
     return other is SailorCartCounterAddon &&
         other.id == id &&
         other.price == price &&
-        other.quantity == quantity &&
         other.min == min &&
-        other.max == max;
+        other.max == max &&
+        other.quantity == quantity;
   }
 
   @override
   int get hashCode {
     return id.hashCode ^
         price.hashCode ^
-        quantity.hashCode ^
         min.hashCode ^
-        max.hashCode;
+        max.hashCode ^
+        quantity.hashCode;
   }
 
   @override
   String toString() =>
-      'SailorCartCounterAddon(id: $id, price: $price, quantity: $quantity, min: $min, max: $max)';
+      'SailorCartCounterAddon(id: $id, price: $price, min: $min, max: $max, quantity: $quantity)';
+
+  @override
+  double get total => price.total * quantity;
+
+  @override
+  double get tax => price.tax * quantity;
+
+  @override
+  double get subtotal => price.subtotal * quantity;
 }
 
 @immutable
@@ -492,7 +479,6 @@ class SailorCart<T, E> extends ChangeNotifier {
     notifyListeners();
   }
 
-  //  TODO: Quantity does not belong in the base class
   void addSingleAddon(T product, E addon) {
     var target = getProduct(product);
     target ??= productAdapter(product).copyWith(draft: true);
@@ -520,16 +506,11 @@ class SailorCart<T, E> extends ChangeNotifier {
     var target = getProduct(product);
     target ??= productAdapter(product).copyWith(draft: true);
 
-    final addonProduct = addonAdapter(addon);
+    final addonProduct = addonAdapter(addon) as SailorCartMultipleAddon;
     final exists = target.addons.any((a) => a.id == addonProduct.id);
     if (!exists) {
       final newProduct = target.copyWith(
-        addons: List.from(target.addons)
-          ..add(
-            addonProduct.copyWith(
-                quantity:
-                    addonProduct.quantity == 0 ? 1 : addonProduct.quantity),
-          ),
+        addons: List.from(target.addons)..add(addonProduct),
       );
 
       _state = _state.copyWith(
@@ -543,16 +524,7 @@ class SailorCart<T, E> extends ChangeNotifier {
 
     final newProduct = target.copyWith(
       addons: List.from(target.addons)
-          .map((a) {
-            if (a.id == addonProduct.id) {
-              return a.copyWith(
-                quantity: a.quantity + 1,
-              );
-            }
-            return a;
-          })
-          .toList()
-          .cast(),
+        ..removeWhere((a) => a.id == addonProduct.id),
     );
 
     _state = _state.copyWith(
@@ -574,7 +546,8 @@ class SailorCart<T, E> extends ChangeNotifier {
     final existingAddon = target.addons
         .firstWhere((a) => a.id == addonProduct.id, orElse: () => addonProduct);
 
-    if (existingAddon.quantity == 1) {
+    if (existingAddon is! SailorCartCounterAddon ||
+        existingAddon.quantity == 1) {
       final newProduct = target.copyWith(
         addons: List.from(target.addons)
           ..removeWhere((a) => a.id == addonProduct.id),
