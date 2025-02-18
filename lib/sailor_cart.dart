@@ -55,6 +55,24 @@ class SailorPrice {
   String toString() =>
       'SailorPrice(value: $value, taxInclusive: $taxInclusive, taxRate: $taxRate, percentage: $percentage)';
 
+  factory SailorPrice.fromJson(Map<String, dynamic> json) {
+    return SailorPrice(
+      value: json['value'],
+      taxInclusive: json['taxInclusive'],
+      taxRate: json['taxRate'],
+      percentage: json['percentage'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'value': value,
+      'taxInclusive': taxInclusive,
+      'taxRate': taxRate,
+      'percentage': percentage,
+    };
+  }
+
   double get total {
     if (taxInclusive) {
       return value;
@@ -145,6 +163,28 @@ class SailorCartProduct {
   String toString() =>
       'SailorCartProduct(id: $id, addons: $addons, price: $price, quantity: $quantity, draft: $draft)';
 
+  factory SailorCartProduct.fromJson(Map<String, dynamic> json) {
+    return SailorCartProduct(
+      id: json['id'],
+      addons: List<SailorCartAddon>.from(
+        json['addons']?.map((x) => SailorCartAddon.fromJson(x)) ?? [],
+      ),
+      price: SailorPrice.fromJson(json['price']),
+      quantity: json['quantity'],
+      draft: json['draft'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'addons': addons.map((x) => x.toJson()).toList(),
+      'price': price.toJson(),
+      'quantity': quantity,
+      'draft': draft,
+    };
+  }
+
   double get total {
     final addonsTotal =
         addons.fold<double>(0, (sum, addon) => sum + addon.total);
@@ -181,6 +221,21 @@ abstract class SailorCartAddon {
   double get tax => price.tax;
 
   double get subtotal => price.subtotal;
+
+  factory SailorCartAddon.fromJson(Map<String, dynamic> json) {
+    switch (json['type']) {
+      case 'single':
+        return SailorCartSingleAddon.fromJson(json);
+      case 'multiple':
+        return SailorCartMultipleAddon.fromJson(json);
+      case 'counter':
+        return SailorCartCounterAddon.fromJson(json);
+      default:
+        throw Exception('Invalid addon type');
+    }
+  }
+
+  Map<String, dynamic> toJson();
 }
 
 @immutable
@@ -195,7 +250,6 @@ class SailorCartSingleAddon extends SailorCartAddon {
     this.selected = false,
   });
 
-  @override
   SailorCartSingleAddon copyWith({
     String? id,
     SailorPrice? price,
@@ -229,6 +283,29 @@ class SailorCartSingleAddon extends SailorCartAddon {
   @override
   String toString() =>
       'SailorCartSingleAddon(id: $id, price: $price, group: $group, selected: $selected)';
+
+  factory SailorCartSingleAddon.fromJson(Map<String, dynamic> json) {
+    if (json['type'] != 'single') {
+      throw Exception('Invalid addon type');
+    }
+
+    return SailorCartSingleAddon(
+      id: json['id'],
+      price: SailorPrice.fromJson(json['price']),
+      group: json['group'],
+      selected: json['selected'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'price': price.toJson(),
+      'group': group,
+      'selected': selected,
+      'type': 'single',
+    };
+  }
 }
 
 @immutable
@@ -264,6 +341,25 @@ class SailorCartMultipleAddon extends SailorCartAddon {
 
   @override
   String toString() => 'SailorCartMultipleAddon(id: $id, price: $price)';
+
+  factory SailorCartMultipleAddon.fromJson(Map<String, dynamic> json) {
+    if (json['type'] != 'multiple') {
+      throw Exception('Invalid addon type');
+    }
+
+    return SailorCartMultipleAddon(
+      id: json['id'],
+      price: SailorPrice.fromJson(json['price']),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'price': price.toJson(),
+      'type': 'multiple',
+    };
+  }
 }
 
 @immutable
@@ -321,6 +417,31 @@ class SailorCartCounterAddon extends SailorCartAddon {
   String toString() =>
       'SailorCartCounterAddon(id: $id, price: $price, min: $min, max: $max, quantity: $quantity)';
 
+  factory SailorCartCounterAddon.fromJson(Map<String, dynamic> json) {
+    if (json['type'] != 'counter') {
+      throw Exception('Invalid addon type');
+    }
+
+    return SailorCartCounterAddon(
+      id: json['id'],
+      price: SailorPrice.fromJson(json['price']),
+      min: json['min'],
+      max: json['max'],
+      quantity: json['quantity'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'price': price.toJson(),
+      'min': min,
+      'max': max,
+      'quantity': quantity,
+      'type': 'counter',
+    };
+  }
+
   @override
   double get total => price.total * quantity;
 
@@ -359,6 +480,20 @@ class SailorCartState {
 
   @override
   String toString() => 'SailorCartState(products: $products)';
+
+  factory SailorCartState.fromJson(Map<String, dynamic> json) {
+    return SailorCartState(
+      products: List<SailorCartProduct>.from(
+        json['products']?.map((x) => SailorCartProduct.fromJson(x)) ?? [],
+      ),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'products': products.map((x) => x.toJson()).toList(),
+    };
+  }
 }
 
 class SailorCart<T, E> extends ChangeNotifier {
@@ -372,22 +507,64 @@ class SailorCart<T, E> extends ChangeNotifier {
 
   SailorCartState _state = const SailorCartState(products: []);
 
-  // returns a list of all of the products in the cart that are not drafts
   UnmodifiableListView<SailorCartProduct> get products =>
       UnmodifiableListView(_state.products.where((p) => !p.draft));
 
   void addProduct(T product) {
+    final exists =
+        _state.products.any((p) => p == productAdapter(product));
+
+    if (!exists) {
+      _state = _state.copyWith(
+        products: List.from(_state.products)..add(productAdapter(product)),
+      );
+
+      notifyListeners();
+      return;
+    }
+
+    final newProduct = _state.products.map((p) {
+      if (p == productAdapter(product)) {
+        return p.copyWith(
+          quantity: p.quantity + 1,
+        );
+      }
+      return p;
+    }).toList();
+
     _state = _state.copyWith(
-      products: List.from(_state.products)..add(productAdapter(product)),
+      products: newProduct,
     );
 
     notifyListeners();
   }
 
   void removeProduct(T product) {
+    final existing = _state.products.firstWhere(
+      (p) => p.id == productAdapter(product).id,
+    );
+
+    if (existing.quantity == 1) {
+      _state = _state.copyWith(
+        products: List.from(_state.products)
+          ..removeWhere((p) => p == productAdapter(product)),
+      );
+
+      notifyListeners();
+      return;
+    }
+
+    final newProducts = _state.products.map((p) {
+      if (p.id == productAdapter(product).id) {
+        return p.copyWith(
+          quantity: p.quantity - 1,
+        );
+      }
+      return p;
+    }).toList();
+
     _state = _state.copyWith(
-      products: List.from(_state.products)
-        ..removeWhere((p) => p == productAdapter(product)),
+      products: newProducts,
     );
 
     notifyListeners();
@@ -413,7 +590,6 @@ class SailorCart<T, E> extends ChangeNotifier {
     return result;
   }
 
-  // utility method that can be used to add an addon regardless of the explicit type
   void addAddon(T product, E addon) {
     switch (addonAdapter(addon)) {
       case SailorCartSingleAddon _:
@@ -430,7 +606,6 @@ class SailorCart<T, E> extends ChangeNotifier {
     }
   }
 
-  // counter addons are addons that have a quantity limit denoted by min and max can be added, incremented, decremented, or removed
   void addCounterAddon(T product, E addon) {
     var target = getProduct(product);
     target ??= productAdapter(product).copyWith(draft: true);
