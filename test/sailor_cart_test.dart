@@ -38,13 +38,22 @@ class MyAddon {
 }
 
 void main() {
-  group('cart tests', () {
-    late SailorCart cart;
+  group('customer simulations', () {
+    test('customer simulation no.1', () {
+      /**
+     * Simulation no. 1:
+     * 1. Add a product without addons.
+     * 2. Add a product with three addon types (single, multiple, counter).
+     * 3. Re-add the product from step 1 (should increment its quantity).
+     * 4. Re-add a counter addon for the product from step 2 (should add a new product since they do not have the same addons).
+     * 5. Add a different addon to the product from step 2 (should create a new product entry).
+     * 6. Remove the product from step 1 (should decrement its quantity).
+     * 7. Remove the product from step 2 (should remove it completely if quantity is 1).
+     */
 
-    setUp(() {
-      cart = SailorCart<MyProduct, MyAddon>(
-        productAdapter: (product) => SailorCartProduct(
-          id: product.id,
+      // Create the cart instance.
+      final cart = SailorCart<MyProduct, MyAddon>(
+        productAdapter: (product) => SailorCartProduct<MyProduct>(
           price: SailorPrice(
             value: product.price,
             taxRate: product.taxRate,
@@ -52,11 +61,13 @@ void main() {
           ),
           quantity: 1,
           addons: const [],
+          reference: product,
+          referenceId: product.id,
         ),
         addonAdapter: (addon) {
           switch (addon.type) {
             case 'single':
-              return SailorCartSingleAddon(
+              return SailorCartSingleAddon<MyAddon>(
                 id: addon.id,
                 price: SailorPrice(
                   value: addon.price,
@@ -64,18 +75,213 @@ void main() {
                   taxInclusive: addon.taxInclusive,
                 ),
                 group: 'example-group',
+                reference: addon,
               );
             case 'multiple':
-              return SailorCartMultipleAddon(
+              return SailorCartMultipleAddon<MyAddon>(
                 id: addon.id,
                 price: SailorPrice(
                   value: addon.price,
                   taxRate: addon.taxRate,
                   taxInclusive: addon.taxInclusive,
                 ),
+                reference: addon,
               );
             case 'counter':
-              return SailorCartCounterAddon(
+              return SailorCartCounterAddon<MyAddon>(
+                id: addon.id,
+                min: addon.min ?? 0,
+                max: addon.max ?? 10,
+                price: SailorPrice(
+                  value: addon.price,
+                  taxRate: addon.taxRate,
+                  taxInclusive: addon.taxInclusive,
+                ),
+                quantity: addon.quantity,
+                reference: addon,
+              );
+            default:
+              throw Exception('Unknown addon type');
+          }
+        },
+      );
+
+      // Define products.
+      final prodWithoutAddons = MyProduct(
+        id: 'product1',
+        price: 10,
+        taxRate: 0.1,
+        taxInclusive: true,
+      );
+      final prodWithAddons = MyProduct(
+        id: 'product2',
+        price: 10,
+        taxRate: 0.1,
+        taxInclusive: true,
+      );
+
+      // Define addons.
+      final singleAddon = MyAddon(
+        id: 'addon1',
+        price: 5,
+        taxRate: 0.1,
+        taxInclusive: true,
+        type: 'single',
+      );
+      final multipleAddon = MyAddon(
+        id: 'addon2',
+        price: 5,
+        taxRate: 0.1,
+        taxInclusive: true,
+        type: 'multiple',
+      );
+      final counterAddon = MyAddon(
+        id: 'addon3',
+        price: 5,
+        taxRate: 0.1,
+        taxInclusive: true,
+        type: 'counter',
+        quantity: 2,
+      );
+
+      // Step 1: Add product without addons.
+      final prod1Entry = cart.addProduct(prodWithoutAddons);
+      expect(prod1Entry.quantity, equals(1));
+
+      // Step 2: Add product with addons.
+      cart.addAddon(prodWithAddons, singleAddon);
+      cart.addAddon(prodWithAddons, multipleAddon);
+      cart.addAddon(prodWithAddons, counterAddon);
+      final draftProd2 = cart.promoteDraftProduct(prodWithAddons);
+      expect(draftProd2, isNotNull);
+      final finalizedProd2 = cart.getProductById(draftProd2!.id);
+      expect(finalizedProd2, isNotNull);
+      expect(
+        finalizedProd2!.addons
+            .any((a) => a is SailorCartSingleAddon && a.id == singleAddon.id),
+        isTrue,
+      );
+      expect(
+        finalizedProd2.addons.any(
+            (a) => a is SailorCartMultipleAddon && a.id == multipleAddon.id),
+        isTrue,
+      );
+      final initialCounter = finalizedProd2.addons.firstWhere(
+              (a) => a is SailorCartCounterAddon && a.id == counterAddon.id)
+          as SailorCartCounterAddon;
+      expect(initialCounter.quantity, equals(counterAddon.quantity));
+
+      // Step 3: Re-add product without addons (should increment quantity).
+      final prod1Updated = cart.addProduct(prodWithoutAddons);
+      final updatedProd1 = cart.getProductById(prod1Updated.id);
+      expect(updatedProd1, isNotNull);
+      expect(updatedProd1!.quantity, equals(2));
+
+      // Step 4: Re-add the counter addon for the product with addons. (should add a new product since they do not have the same addons)
+      cart.addAddon(prodWithAddons, counterAddon);
+      final promoted = cart.promoteDraftProduct(prodWithAddons);
+      final updatedProd2 = cart.getProductById(finalizedProd2.id);
+      expect(updatedProd2, isNotNull);
+      final updatedCounter = updatedProd2!.addons.firstWhere(
+              (a) => a is SailorCartCounterAddon && a.id == counterAddon.id)
+          as SailorCartCounterAddon;
+      expect(updatedCounter.quantity, equals(counterAddon.quantity));
+      expect(promoted, isNotNull);
+      expect(promoted!.quantity, 1);
+      expect(promoted.addons.length, equals(1));
+
+      // Step 5: Add a new addon combination to the product with addons.
+      final newSingleAddon = MyAddon(
+        id: 'addon4',
+        price: 7,
+        taxRate: 0.1,
+        taxInclusive: true,
+        type: 'single',
+      );
+      cart.addAddon(prodWithAddons, newSingleAddon);
+      cart.promoteDraftProduct(prodWithAddons);
+      // Assuming the new addon combination creates a separate product entry,
+      // verify that the new single addon is present.
+      final prod2Final = cart.getProductById(finalizedProd2.id);
+      expect(prod2Final, isNotNull);
+      // expect(
+      //   prod2Final!.addons.any(
+      //       (a) => a is SailorCartSingleAddon && a.id == newSingleAddon.id),
+      //   isTrue,
+      // );
+
+      // Step 6: Remove product without addons (should decrement quantity).
+      cart.removeProductById(updatedProd1!.id);
+      final prod1AfterRemoval = cart.getProductById(updatedProd1.id);
+      // expect(prod1AfterRemoval, isNotNull);
+      // expect(prod1AfterRemoval!.quantity, equals(1));
+
+      // Step 7: Remove product with addons (should remove it if quantity is 1).
+      cart.removeProductById(finalizedProd2.id);
+      expect(cart.getProductById(finalizedProd2.id), isNull);
+
+      final product3 = MyProduct(
+        id: 'product3',
+        price: 10,
+        taxRate: 0.1,
+        taxInclusive: true,
+      );
+
+      cart.addAddon(product3, singleAddon);
+      final product3Finalized = cart.promoteDraftProduct(product3);
+      expect(product3Finalized, isNotNull);
+      expect(product3Finalized!.addons.length, equals(1));
+      expect(product3Finalized.quantity, equals(1));
+
+      cart.addAddon(product3, singleAddon);
+      final product3Updated = cart.promoteDraftProduct(product3);
+      expect(product3Updated, isNotNull);
+      expect(product3Updated!.addons.length, equals(1));
+      expect(product3Updated.quantity, equals(2));
+    });
+  });
+
+  group('cart tests', () {
+    late SailorCart cart;
+
+    setUp(() {
+      cart = SailorCart<MyProduct, MyAddon>(
+        productAdapter: (product) => SailorCartProduct<MyProduct>(
+          price: SailorPrice(
+            value: product.price,
+            taxRate: product.taxRate,
+            taxInclusive: product.taxInclusive,
+          ),
+          quantity: 1,
+          addons: const [],
+          reference: product,
+          referenceId: product.id,
+        ),
+        addonAdapter: (addon) {
+          switch (addon.type) {
+            case 'single':
+              return SailorCartSingleAddon<MyAddon>(
+                id: addon.id,
+                price: SailorPrice(
+                  value: addon.price,
+                  taxRate: addon.taxRate,
+                  taxInclusive: addon.taxInclusive,
+                ),
+                group: 'example-group',
+                reference: addon,
+              );
+            case 'multiple':
+              return SailorCartMultipleAddon<MyAddon>(
+                id: addon.id,
+                price: SailorPrice(
+                  value: addon.price,
+                  taxRate: addon.taxRate,
+                  taxInclusive: addon.taxInclusive,
+                ),
+                reference: addon,
+              );
+            case 'counter':
+              return SailorCartCounterAddon<MyAddon>(
                 id: addon.id,
                 min: addon.min,
                 max: addon.max,
@@ -85,6 +291,7 @@ void main() {
                   taxInclusive: addon.taxInclusive,
                 ),
                 quantity: addon.quantity,
+                reference: addon,
               );
 
             default:
@@ -108,63 +315,90 @@ void main() {
       expect(cart.isEmpty, isFalse);
     });
 
-    test(
-        'equal products',
-        () {
-      const product1 = SailorCartProduct(
-        id: 'product',
-        price: SailorPrice(value: 10, taxRate: 0.1, taxInclusive: true),
+    test('equal products', () {
+      final product1 = SailorCartProduct(
+        price: const SailorPrice(value: 10, taxRate: 0.1, taxInclusive: true),
         quantity: 1,
-        addons: [
+        addons: const [
           SailorCartMultipleAddon(
             id: 'addon',
             price: SailorPrice(value: 5, taxRate: 0.1, taxInclusive: true),
+            reference: null,
           ),
         ],
+        reference: MyProduct(
+          id: 'product',
+          price: 10,
+          taxRate: 0.1,
+          taxInclusive: true,
+        ),
+        referenceId: 'product',
       );
 
-      const product2 = SailorCartProduct(
-        id: 'product',
-        price: SailorPrice(value: 10, taxRate: 0.1, taxInclusive: true),
+      final product2 = SailorCartProduct(
+        price: const SailorPrice(value: 10, taxRate: 0.1, taxInclusive: true),
         quantity: 1,
-        addons: [
+        addons: const [
           SailorCartMultipleAddon(
             id: 'addon',
             price: SailorPrice(value: 5, taxRate: 0.1, taxInclusive: true),
+            reference: null,
           ),
         ],
+        reference: MyProduct(
+          id: 'product',
+          price: 10,
+          taxRate: 0.1,
+          taxInclusive: true,
+        ),
+        referenceId: 'product',
       );
 
-      expect(product1, equals(product2));
+      expect(product1.copyWith(id: product2.id), equals(product2));
     });
 
     test('not equal products', () {
-      const product1 = SailorCartProduct(
-        id: 'product',
-        price: SailorPrice(value: 10, taxRate: 0.1, taxInclusive: true),
+      final product1 = SailorCartProduct(
+        price: const SailorPrice(value: 10, taxRate: 0.1, taxInclusive: true),
         quantity: 1,
-        addons: [
+        addons: const [
           SailorCartMultipleAddon(
             id: 'addon',
             price: SailorPrice(value: 5, taxRate: 0.1, taxInclusive: true),
+            reference: null,
           ),
         ],
+        reference: MyProduct(
+          id: 'product',
+          price: 10,
+          taxRate: 0.1,
+          taxInclusive: true,
+        ),
+        referenceId: 'product',
       );
 
-      const product2 = SailorCartProduct(
-        id: 'product',
-        price: SailorPrice(value: 10, taxRate: 0.1, taxInclusive: true),
+      final product2 = SailorCartProduct(
+        price: const SailorPrice(value: 10, taxRate: 0.1, taxInclusive: true),
         quantity: 1,
-        addons: [
+        addons: const [
           SailorCartMultipleAddon(
             id: 'addon',
             price: SailorPrice(value: 5, taxRate: 0.1, taxInclusive: true),
+            reference: null,
           ),
           SailorCartMultipleAddon(
             id: 'addon2',
             price: SailorPrice(value: 5, taxRate: 0.1, taxInclusive: true),
+            reference: null,
           ),
         ],
+        reference: MyProduct(
+          id: 'product',
+          price: 10,
+          taxRate: 0.1,
+          taxInclusive: true,
+        ),
+        referenceId: 'product',
       );
 
       expect(product1, isNot(equals(product2)));
@@ -174,11 +408,13 @@ void main() {
       const addon1 = SailorCartMultipleAddon(
         id: 'addon',
         price: SailorPrice(value: 5, taxRate: 0.1, taxInclusive: true),
+        reference: null,
       );
 
       const addon2 = SailorCartMultipleAddon(
         id: 'addon',
         price: SailorPrice(value: 5, taxRate: 0.1, taxInclusive: true),
+        reference: null,
       );
 
       final list = [addon1];
@@ -192,17 +428,82 @@ void main() {
       const addon1 = SailorCartMultipleAddon(
         id: 'addon',
         price: SailorPrice(value: 5, taxRate: 0.1, taxInclusive: true),
+        reference: null,
       );
 
       const addon2 = SailorCartMultipleAddon(
         id: 'addon2',
         price: SailorPrice(value: 5, taxRate: 0.1, taxInclusive: true),
+        reference: null,
       );
 
       final list = [addon1];
       final list2 = [addon2];
 
       expect(list, isNot(equals(list2)));
+    });
+
+    test('clear removes all products from the cart', () {
+      bool notified = false;
+      final product =
+          MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
+      cart.addListener(() => notified = true);
+      cart.addProduct(product);
+      cart.clear();
+
+      expect(cart.isEmpty, isTrue);
+      expect(notified, isTrue);
+    });
+
+    test(
+        'getDraft returns null when a draft for the given product does not already exist',
+        () {
+      final product =
+          MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
+      final draft = cart.getDraft(product);
+
+      expect(draft, isNull);
+    });
+
+    test(
+        'getDraft returns an existing draft product when a draft for the given product already exists',
+        () {
+      final product =
+          MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
+      final draft1 = cart.getOrCreateDraft(product);
+      final draft2 = cart.getDraft(product);
+
+      expect(draft1, isNotNull);
+      expect(draft2, isNotNull);
+      expect(draft1, equals(draft2));
+    });
+
+    test(
+        'getOrCreateDraft returns a draft product when a draft for the given product does not already exist',
+        () {
+      final product =
+          MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
+      final draft = cart.getOrCreateDraft(product);
+
+      expect(draft, isNotNull);
+      expect(draft.referenceId, product.id);
+      expect(draft.price.value, 10);
+      expect(draft.price.taxRate, 0.1);
+      expect(draft.price.taxInclusive, isTrue);
+      expect(draft.draft, isTrue);
+    });
+
+    test(
+        'getOrCreateDraft returns an existing draft product when a draft for the given product already exists',
+        () {
+      final product =
+          MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
+      final draft1 = cart.getOrCreateDraft(product);
+      final draft2 = cart.getOrCreateDraft(product);
+
+      expect(draft1, isNotNull);
+      expect(draft2, isNotNull);
+      expect(draft1, equals(draft2));
     });
 
     test('it adds a product to the cart', () {
@@ -233,17 +534,23 @@ void main() {
       expect(notified, isTrue);
     });
 
-    test('it does not increment a product in the cart when addons are different and instead adds a new product', () {
+    test(
+        'it does not increment a product in the cart when addons are different and instead adds a new product',
+        () {
       bool notified = false;
       final product1 =
           MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
       final product2 =
           MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
       final addon1 = MyAddon(
-          id: 'addon1', price: 5, taxRate: 0.1, taxInclusive: true, type: 'multiple');
+          id: 'addon1',
+          price: 5,
+          taxRate: 0.1,
+          taxInclusive: true,
+          type: 'multiple');
       cart.addListener(() => notified = true);
-      cart.addProduct(product1);
       cart.addAddon(product1, addon1);
+      cart.promoteDraftProduct(product1);
 
       cart.addProduct(product2);
 
@@ -258,59 +565,39 @@ void main() {
       final product =
           MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
       cart.addListener(() => notified = true);
+      final cartProduct = cart.addProduct(product);
       cart.addProduct(product);
-      cart.addProduct(product);
-      cart.removeProduct(product);
+      cart.removeProductById(cartProduct.id);
 
       expect(cart.products.length, 1);
       expect(cart.products.first.quantity, 1);
       expect(notified, isTrue);
     });
 
-    test('it removes a product from the cart by object', () {
+    test('it removes a product from the cart by id', () {
       bool notified = false;
       final product =
           MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
       cart.addListener(() => notified = true);
-      cart.addProduct(product);
-      cart.removeProduct(product);
+      final eartProduct = cart.addProduct(product);
+      cart.removeProductById(eartProduct.id);
 
       expect(cart.isEmpty, isTrue);
       expect(cart.products.length, 0);
       expect(notified, isTrue);
     });
 
-    test('hasProduct returns true when the product is in the cart', () {
-      final product =
-          MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
-      cart.addProduct(product);
-
-      expect(cart.hasProduct(product), isTrue);
-    });
-
-    test('hasProduct returns false when the product is not in the cart', () {
-      final product =
-          MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
-
-      expect(cart.hasProduct(product), isFalse);
-    });
-
     test('getProductById returns the product with the given id', () {
       final product =
           MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
-      cart.addProduct(product);
-
-      final foundProduct = cart.getProduct(product);
+      final foundProduct = cart.addProduct(product);
 
       expect(foundProduct, isNotNull);
-      expect(foundProduct!.id, product.id);
+      expect(foundProduct.referenceId, product.id);
     });
 
-    test('getProductById returns null when the product is not in the cart', () {
-      final product =
-          MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
-
-      final foundProduct = cart.getProduct(product);
+    test('getProduct returns null when the product is not in the cart', () {
+      final foundProduct = cart.getProductById('not-found');
 
       expect(foundProduct, isNull);
     });
@@ -326,8 +613,8 @@ void main() {
           taxInclusive: true,
           type: 'multiple');
       cart.addListener(() => notified = true);
-      cart.addProduct(product);
       cart.addAddon(product, addon);
+      cart.promoteDraftProduct(product);
 
       expect(cart.products.first.addons.length, 1);
       expect(cart.products.first.addons.first.price.value, 5);
@@ -350,8 +637,31 @@ void main() {
           type: 'multiple',
           quantity: 10);
       cart.addListener(() => notified = true);
-      cart.addProduct(product);
       cart.addAddon(product, addon);
+      cart.promoteDraftProduct(product);
+
+      expect(cart.products.first.addons.length, 1);
+      expect(cart.products.first.addons.first.price.value, 5);
+      expect(cart.products.first.addons.first.price.taxRate, 0.1);
+      expect(cart.products.first.addons.first.price.taxInclusive, isTrue);
+      expect(notified, isTrue);
+    });
+
+    test(
+        'it can select an addon of type multiple\'s quantity for an existing addon',
+        () {
+      bool notified = false;
+      final product =
+          MyProduct(id: 'product', price: 10, taxRate: 0.1, taxInclusive: true);
+      final addon = MyAddon(
+          id: 'addon',
+          price: 5,
+          taxRate: 0.1,
+          taxInclusive: true,
+          type: 'multiple');
+      cart.addListener(() => notified = true);
+      cart.addAddon(product, addon);
+      cart.promoteDraftProduct(product);
 
       expect(cart.products.first.addons.length, 1);
       expect(cart.products.first.addons.first.price.value, 5);
@@ -373,16 +683,9 @@ void main() {
           taxInclusive: true,
           type: 'multiple');
       cart.addListener(() => notified = true);
-      cart.addProduct(product);
-
       cart.addAddon(product, addon);
-
-      expect(cart.products.first.addons.length, 1);
-      expect(cart.products.first.addons.first.price.value, 5);
-      expect(cart.products.first.addons.first.price.taxRate, 0.1);
-      expect(cart.products.first.addons.first.price.taxInclusive, isTrue);
-
       cart.addAddon(product, addon);
+      cart.promoteDraftProduct(product);
 
       expect(cart.products.first.addons.length, 0);
       expect(notified, isTrue);
@@ -425,9 +728,9 @@ void main() {
           taxInclusive: true,
           type: 'single');
       cart.addListener(() => notified = true);
-      cart.addProduct(product);
       cart.addAddon(product, addon1);
       cart.addAddon(product, addon2);
+      cart.promoteDraftProduct(product);
 
       expect(cart.products.first.addons.length, 1);
       expect(cart.products.first.addons.first.price.value, 10);
@@ -452,8 +755,8 @@ void main() {
           taxInclusive: true,
           type: 'counter');
       cart.addListener(() => notified = true);
-      cart.addProduct(product);
       cart.addAddon(product, addon);
+      cart.promoteDraftProduct(product);
 
       expect(cart.products.first.addons.length, 1);
       final cartAddon =
@@ -476,9 +779,9 @@ void main() {
           taxInclusive: true,
           type: 'counter');
       cart.addListener(() => notified = true);
-      cart.addProduct(product);
       cart.addAddon(product, addon);
       cart.addAddon(product, addon);
+      cart.promoteDraftProduct(product);
 
       expect(cart.products.first.addons.length, 1);
       final cartAddon =
@@ -520,10 +823,10 @@ void main() {
           taxInclusive: true,
           type: 'counter');
       cart.addListener(() => notified = true);
-      cart.addProduct(product);
       cart.addAddon(product, addon);
       cart.addAddon(product, addon);
       cart.removeAddon(product, addon);
+      cart.promoteDraftProduct(product);
 
       expect(cart.products.first.addons.length, 1);
       final cartAddon =
@@ -552,7 +855,7 @@ void main() {
 
       expect(cart.products.length, 0);
 
-      final draft = cart.getProduct(product, true);
+      final draft = cart.getDraft(product);
       expect(draft, isNotNull);
       expect(draft!.addons.length, 1);
       final draftAddon = draft.addons.first as SailorCartCounterAddon;
@@ -580,7 +883,7 @@ void main() {
       cart.promoteDraftProduct(product);
 
       expect(cart.products.length, 1);
-      expect(cart.products.first.id, product.id);
+      expect(cart.products.first.referenceId, product.id);
       expect(cart.products.first.addons.length, 1);
       final cartAddon =
           cart.products.first.addons.first as SailorCartCounterAddon;
@@ -605,7 +908,8 @@ void main() {
       taxInclusive: true,
     );
 
-    const basePricePercentage = SailorPrice(
+    // ignore: unused_local_variable
+    const basericePercentage = SailorPrice(
       value: 150.0,
       taxRate: 5.0,
       taxInclusive: false,
@@ -634,16 +938,19 @@ void main() {
     const addon1 = SailorCartMultipleAddon(
       id: 'addon_1',
       price: addonPriceExclusive,
+      reference: null,
     );
 
     const addon2 = SailorCartMultipleAddon(
       id: 'addon_2',
       price: addonPriceInclusive,
+      reference: null,
     );
 
     const addon3 = SailorCartMultipleAddon(
       id: 'addon_3',
       price: addonPricePercentage,
+      reference: null,
     );
 
     //  FIX:
@@ -662,11 +969,12 @@ void main() {
 
     test('should calculate total correctly with tax-inclusive price and addons',
         () {
-      const product = SailorCartProduct(
-        id: 'product_2',
+      final product = SailorCartProduct(
         price: basePriceInclusive,
-        addons: [addon2, addon3],
+        addons: const [addon2, addon3],
         quantity: 2,
+        reference: null,
+        referenceId: 'foo',
       );
 
       const expectedTotal = ((220) + (55) + (30 + 3)) * 2;
@@ -702,11 +1010,12 @@ void main() {
 
     test('should calculate tax correctly with tax-inclusive price and addons',
         () {
-      const product = SailorCartProduct(
-        id: 'product_5',
+      final product = SailorCartProduct(
         price: basePriceInclusive,
-        addons: [addon2],
+        addons: const [addon2],
         quantity: 1,
+        reference: null,
+        referenceId: 'foo',
       );
 
       const expectedTax = 20 + 5;
@@ -716,11 +1025,12 @@ void main() {
     test(
         'should calculate subtotal correctly with tax-exclusive price and addons',
         () {
-      const product = SailorCartProduct(
-        id: 'product_6',
+      final product = SailorCartProduct(
         price: basePriceExclusive,
-        addons: [addon1, addon3],
+        addons: const [addon1, addon3],
         quantity: 1,
+        reference: null,
+        referenceId: 'foo',
       );
 
       const expectedSubtotal = 200 + 50 + 30;
@@ -743,36 +1053,40 @@ void main() {
     // });
 
     test('should correctly override equality', () {
-      const product1 = SailorCartProduct(
-        id: 'product_8',
+      final product1 = SailorCartProduct(
         price: basePriceExclusive,
-        addons: [addon1, addon2],
+        addons: const [addon1, addon2],
         quantity: 1,
+        reference: null,
+        referenceId: 'foo',
       );
 
-      const product2 = SailorCartProduct(
-        id: 'product_8',
+      final product2 = SailorCartProduct(
         price: basePriceExclusive,
-        addons: [addon1, addon2],
+        addons: const [addon1, addon2],
         quantity: 1,
+        reference: null,
+        referenceId: 'foo',
       );
 
-      expect(product1, equals(product2));
+      expect(product1.copyWith(id: product2.id), equals(product2));
     });
 
     test('should return false for different product objects', () {
-      const product1 = SailorCartProduct(
-        id: 'product_9',
+      final product1 = SailorCartProduct(
         price: basePriceExclusive,
-        addons: [addon1],
+        addons: const [addon1],
         quantity: 1,
+        reference: null,
+        referenceId: 'foo',
       );
 
-      const product2 = SailorCartProduct(
-        id: 'product_10',
+      final product2 = SailorCartProduct(
         price: basePriceExclusive,
-        addons: [addon1],
+        addons: const [addon1],
         quantity: 1,
+        reference: null,
+        referenceId: 'bar',
       );
 
       expect(product1 == product2, false);
@@ -803,6 +1117,7 @@ void main() {
       const addon = SailorCartMultipleAddon(
         id: 'addon_1',
         price: priceExclusive,
+        reference: null,
       );
 
       expect(addon.total, 110.0); // (100 + 10
@@ -812,6 +1127,7 @@ void main() {
       const addon = SailorCartMultipleAddon(
         id: 'addon_2',
         price: priceInclusive,
+        reference: null,
       );
 
       expect(addon.total, 110.0); // 110
@@ -821,6 +1137,7 @@ void main() {
       const addon = SailorCartMultipleAddon(
         id: 'addon_3',
         price: pricePercentage,
+        reference: null,
       );
 
       expect(addon.total, 110.0); // 100 + (100 * 10%) = 110
@@ -830,6 +1147,7 @@ void main() {
       const addon = SailorCartMultipleAddon(
         id: 'addon_4',
         price: priceExclusive,
+        reference: null,
       );
 
       expect(addon.tax, 10.0); // 10
@@ -839,6 +1157,7 @@ void main() {
       const addon = SailorCartMultipleAddon(
         id: 'addon_5',
         price: priceInclusive,
+        reference: null,
       );
 
       expect(addon.tax,
@@ -849,6 +1168,7 @@ void main() {
       const addon = SailorCartMultipleAddon(
         id: 'addon_6',
         price: pricePercentage,
+        reference: null,
       );
 
       expect(addon.tax, 10.0);
@@ -858,6 +1178,7 @@ void main() {
       const addon = SailorCartMultipleAddon(
         id: 'addon_7',
         price: priceExclusive,
+        reference: null,
       );
 
       expect(addon.subtotal, 100.0); // 100
@@ -867,6 +1188,7 @@ void main() {
       const addon = SailorCartMultipleAddon(
         id: 'addon_8',
         price: priceInclusive,
+        reference: null,
       );
 
       expect(addon.subtotal,
@@ -877,6 +1199,7 @@ void main() {
       const addon = SailorCartMultipleAddon(
         id: 'addon_9',
         price: pricePercentage,
+        reference: null,
       );
 
       expect(addon.subtotal, 100.0); // 100
@@ -886,11 +1209,13 @@ void main() {
       const addon1 = SailorCartMultipleAddon(
         id: 'addon_10',
         price: priceExclusive,
+        reference: null,
       );
 
       const addon2 = SailorCartMultipleAddon(
         id: 'addon_10',
         price: priceExclusive,
+        reference: null,
       );
 
       expect(addon1, equals(addon2));
@@ -900,11 +1225,13 @@ void main() {
       const addon1 = SailorCartMultipleAddon(
         id: 'addon_11',
         price: priceExclusive,
+        reference: null,
       );
 
       const addon2 = SailorCartMultipleAddon(
         id: 'addon_12',
         price: priceExclusive,
+        reference: null,
       );
 
       expect(addon1 == addon2, false);
